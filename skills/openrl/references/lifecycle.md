@@ -10,7 +10,7 @@ an image pull (the worker image is several GiB) and a model download.
 |---|---|---|
 | `create_lora_training_client` (LoRA, default) | one trainer for the base model, Workload `lora-<base>-<hash>-0-trainer` | every other LoRA job on the same base model; each job is one adapter in it |
 | first `sample` or `save_weights_and_get_sampling_client`, or already at `create_lora_training_client` with `openrl.recipe=rl` | one sampler, `lora-<base>-<hash>-0-sampler` (plus `-1`, `-2`... up to the largest `openrl.sampler_replicas` any job asked for), behind a CPU dispatcher pod | same |
-| `create_lora_training_client` with `openrl.fine_tuning_type=full`, or `openrl.exclusive=true`, or `openrl.trainer_gpus>1` | a trainer of its own, `fft-<model_id>-trainer`, and later `fft-<model_id>-sampler` | nothing; full fine-tuning workers take turns on a GPU with other jobs' workers unless exclusive |
+| `create_lora_training_client` with `openrl.fine_tuning_type=full`, or `openrl.exclusive=true`, or `openrl.trainer_devices>1` | a trainer of its own, `fft-<model_id>-trainer`, and later `fft-<model_id>-sampler` | nothing; full fine-tuning workers take turns on a GPU with other jobs' workers unless exclusive |
 
 The workers that serve one job appear together in the job's model view,
 `GET /api/v1/openrl/models/{model_id}`.
@@ -70,7 +70,7 @@ full fine-tuning cannot span devices.
    nothing else changes. Ask the platform owner which pools exist; the endpoint does not
    list them yet.
 2. **Then spread the trainer over several GPUs.** When no single device holds the
-   trainer, set `openrl.trainer_backend=automodel` and `openrl.trainer_gpus=N` (2 to 8).
+   trainer, set `openrl.trainer_backend=automodel` and `openrl.trainer_devices=N` (2 to 8).
    The Automodel trainer shards the model with FSDP2 across `N` GPUs on one node, so each
    device needs only its share: a 27B LoRA trainer over four GPUs asks for about 14 GiB
    each, which fits an L4. Multi-GPU is LoRA only, needs the Kubernetes deployment, and
