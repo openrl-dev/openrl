@@ -2,7 +2,7 @@
 
 **Status:** Implemented on `feat/tpu`
 **Author:** Hoda Mohammadi
-**Last updated:** 2026-11-03
+**Last updated:** 2026-11-11
 
 ## 1. Summary
 
@@ -19,9 +19,10 @@ and the scheduler places it on a TPU node through the Kubernetes DRA driver
 for TPUs. GPU code paths are unchanged, and a cluster can hold GPU and TPU
 nodes under one deployment.
 
-What runs: shared and exclusive LoRA, and exclusive full fine-tuning. Each
-worker uses one chip. See [OpenRL on GKE TPU nodes](../setup/tpu-on-gke.md)
-for the setup on GKE.
+What runs: shared and exclusive LoRA, and exclusive full fine-tuning. A
+worker uses one chip by default, and a client can ask for a trainer sharded
+across the chips of its node. See
+[OpenRL on GKE TPU nodes](../setup/tpu-on-gke.md) for the setup on GKE.
 
 ## 2. Overview
 
@@ -82,6 +83,10 @@ work:
 - **The automodel trainer backend on TPU.** It is a CUDA trainer. A job's own
   trainer image is allowed, on the assumption that it brings TorchTPU.
 
+**Sharding is opt-in.** A trainer uses one chip unless the client asks for it
+to be sharded across the chips of a node (section 6). A sharded trainer uses
+every chip of its node and serves one job. The sampler always uses one chip.
+
 Two consequences follow from the preference without the client asking:
 
 - An FFT model whose sampler is on TPU syncs weights as full checkpoints,
@@ -116,30 +121,33 @@ memory capacity, the scheduler uses that instead of the table.
 
 **A whole node per worker.** The TPU driver prepares claims for all chips of
 a node or none. The claim the scheduler builds for a TPU worker therefore asks
-for every chip on a node of the chosen generation, and the worker uses the
-first chip. This leaves chips idle on multi-chip hosts, and it is a
-limitation to address when multi-host workers are built. For now it gives
-deterministic placement: a worker that finds no free node waits in the
-Kubernetes queue instead of starting and colliding with another process at
-runtime initialisation, which is what happens when chips are shared without a
-record of who holds which.
+for every chip on a node of the chosen generation. A single-chip worker uses
+the first chip and leaves the others idle; a sharded trainer uses them all.
+Claiming the whole node gives deterministic placement: a worker that finds no
+free node waits in the Kubernetes queue instead of starting and colliding
+with another process at runtime initialisation, which is what happens when
+chips are shared without a record of who holds which.
 
 **No sharing.** Shared claims, seats and the time-slice ledger exist so FFT
 workers can take turns on a GPU. Every TPU worker is exclusive, LoRA by
 construction and FFT by the rule above, so each gets a claim of its own and
 time slicing is switched off on its pods.
 
-**Fit and waiting.** A worker must fit one chip; there is no multi-chip
-placement. When nothing fits, or no enrolled node of the type exists, the
-Workload stays pending with the reason, and the release deployments set no
-placement deadline. A model that asks for TPU on a cluster whose TPU pool is
-scaled to zero waits for the pool rather than failing.
+**Fit and waiting.** A single-chip worker must fit one chip. A sharded
+trainer is sized per chip: weights, gradients and optimizer state are divided
+by the number of chips, and the working memory of a pass is not. When nothing
+fits, or no enrolled node of the type exists, the Workload stays pending with
+the reason, and the release deployments set no placement deadline. A model
+that asks for TPU on a cluster whose TPU pool is scaled to zero waits for the
+pool rather than failing.
 
 **Host memory** is sized as on GPU, parameters times a per-kind figure plus a
 per-role overhead, with the limit equal to the request. The TPU overheads were
 measured rather than derived, because the hosts differ from GPU hosts in what
 they hold: the trainer's resident memory grows slowly over a run, and
-the sampler's working set is mostly checkpoint page cache.
+the sampler's working set is mostly checkpoint page cache. A sharded
+trainer runs one process per chip, so its host memory is the single-chip
+figure times the number of chips.
 
 ## 5. Worker pods
 
@@ -149,6 +157,8 @@ knobs (the sampler's maximum sequence length and batch size, the trainer's
 token budget) come from a ConfigMap the operator names, applied to TPU pods
 only, so the same API server serves GPU and TPU pods with different settings.
 
+A sharded trainer pod runs one trainer process per chip.
+
 The sampler is started the same way as on GPU: vLLM inside the sampler
 process when one job owns the pool, a `vllm serve` replica behind the
 dispatcher when a pool is shared or has several replicas. The same sampler
@@ -157,12 +167,12 @@ image is used in both cases, and for LoRA and full fine-tuning jobs alike.
 ## 6. Trainer
 
 The training algorithm, the loss functions, the optimizer, the adapter
-lifecycle and the checkpoint writer are shared with GPU. TPU adds three things.
+lifecycle and the checkpoint writer are shared with GPU. TPU adds a few things.
 
 **One device seam.** The worker resolves its device once, at start, and the
 TPU backend is chosen only when asked for; it is never picked automatically.
 Everything after that point is written against `torch.device`, which is what
-keeps the trainer one code base and leaves room for a multi-chip worker later.
+keeps the trainer one code base.
 
 **Shape bucketing.** TorchTPU compiles a program per distinct batch shape, and
 each compile costs on the order of a minute. RL batches have arbitrary shapes,
@@ -173,6 +183,21 @@ The loss is a weighted sum over unmasked tokens, so the result is identical;
 only the shape set is bounded. After the first few steps nothing recompiles,
 and switching adapters does not either, since the compiled program is shared
 across them.
+
+**Parameter sharding across the chips of a node.** The trainer runs one
+process per chip, and each holds a shard of every parameter, gradient and
+optimizer state. A layer's full weight is assembled just before the layer
+runs and released after. This is what the GPU automodel trainer gets from
+FSDP2; on TPU the sharding layer is SimpleFSDP from the TorchTPU project,
+which the trainer carries a copy of.
+
+- Each batch is split across the chips, and every chip runs the same shapes.
+- For LoRA the frozen base is sharded. Every chip holds an identical copy of
+  the adapter, and adapter gradients are summed across chips.
+- Checkpoints and adapters are written as ordinary Hugging Face files, so the
+  sampler cannot tell how many chips trained them.
+
+A model that fits one chip trains faster on one.
 
 **Host allocator.** The TPU runtime runs many host threads, and under the
 default allocator the trainer's resident memory grew every step. The trainer
@@ -246,9 +271,12 @@ refused.
 
 ## 10. Limitations
 
-- **Multi-chip and multi-host workers.** One chip per worker; an FFT model
-  must fit one chip's HBM. A multi-chip trainer would be a gang of processes
-  under FSDP, which the single device seam leaves room for.
+- **Sharding beyond one node.** A trainer is sharded across the chips of one
+  node only.
+- **Multi-chip sampler.** The sampler uses one chip, so a model must fit one
+  chip to be sampled.
+- **Context parallelism.** A sequence is not split across chips.
+- **Shared sharded trainers.** A sharded trainer serves one job.
 - **Per-chip claims.** The driver can hand out chips individually in a shared
   mode, but nothing then records which pod holds which chip, so an unpinned
   pod dies at start instead of queueing. Whole-node claims until the driver
