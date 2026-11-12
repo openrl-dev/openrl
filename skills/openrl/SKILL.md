@@ -46,7 +46,7 @@ following cookbook advice about API keys, model choice, checkpoints or
 | One-command check | `uv --project examples run openrl-doctor` from a clone, or `python -m common.openrl_doctor` in the client image |
 | Base models | Any Hugging Face model id. `supported_models` lists only the configured default. First use of a model downloads it on the cluster. |
 | LoRA or full fine-tuning | `openrl.fine_tuning_type=lora` (default) or `full`; full needs `openrl.fft_enabled: true` in capabilities |
-| A model too big for one GPU | first a bigger device with `openrl.exclusive=true`; then `openrl.trainer_backend=automodel` with `openrl.trainer_devices=N` to shard the trainer across `N` GPUs on one node (LoRA only). The sampler always needs one device that fits the model. Sizing rules in `references/lifecycle.md` |
+| A model too big for one GPU | first a bigger device with `openrl.exclusive=true`; then `openrl.trainer_backend=automodel` with `openrl.trainer_device_count=N` to shard the trainer across `N` GPUs on one node (LoRA only). The sampler always needs one device that fits the model. Sizing rules in `references/lifecycle.md` |
 | Settings | the server's OpenAPI document, `components.schemas.OpenRLSettings` (`/openapi.json`, rendered at `/docs`); `references/settings.md` says how to read and pass them. Pass as `user_metadata` or `TINKER_TAGS=openrl.key=value` |
 | Keep the run alive | Keep the client process and the port-forward up. Session TTL is 120 s; workers are released about 2 minutes after the last heartbeat. |
 | Release workers now | `POST /api/v1/delete_model {"model_id": ...}` (not in the SDK) |

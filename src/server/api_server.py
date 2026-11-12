@@ -272,12 +272,12 @@ class Settings(BaseModel):
     default="pytorch",
     description="The trainer the model runs on: pytorch, automodel (LoRA only), or an image like ghcr.io/org/trainer:tag that runs its own trainer.",
   )
-  trainer_devices: int = Field(
+  trainer_device_count: int = Field(
     default=1,
     ge=1,
     le=8,
     # Named trainer_gpus before; the old name stays accepted.
-    validation_alias=AliasChoices(f"{SETTINGS_PREFIX}trainer_devices", f"{SETTINGS_PREFIX}trainer_gpus"),
+    validation_alias=AliasChoices(f"{SETTINGS_PREFIX}trainer_device_count", f"{SETTINGS_PREFIX}trainer_gpus"),
     description="Accelerator devices the trainer drives as one data-parallel torchrun group. More than one is Automodel only "
     "and makes the model exclusive. openrl.trainer_gpus is a deprecated name for this setting.",
   )
@@ -285,7 +285,7 @@ class Settings(BaseModel):
     default=1,
     ge=1,
     le=8,
-    description="Trainer devices that share one sequence, as context parallelism. The rest of trainer_devices is data parallel.",
+    description="Trainer devices that share one sequence, as context parallelism. The rest of trainer_device_count is data parallel.",
   )
   fine_tuning_type: FineTuningType | None = Field(
     default=None,
@@ -342,7 +342,7 @@ def resolve_settings(*user_metadata: dict[str, Any]) -> Settings:
     # pydantic matches them to the fields by alias.
     merged.update({key: value for key, value in (layer or {}).items() if key.startswith(SETTINGS_PREFIX)})
   # Both names of the renamed setting are one setting, so they must agree.
-  old, new = f"{SETTINGS_PREFIX}trainer_gpus", f"{SETTINGS_PREFIX}trainer_devices"
+  old, new = f"{SETTINGS_PREFIX}trainer_gpus", f"{SETTINGS_PREFIX}trainer_device_count"
   if old in merged and new in merged:
     if str(merged[old]) != str(merged[new]):
       raise ValueError(f"{new}={merged[new]} and {old}={merged[old]} disagree; {old} is the deprecated name of {new}, set only one")
@@ -587,12 +587,12 @@ async def _extract_and_persist_model_metadata(
     raise ValueError("A trainer image needs a server that launches workers as pods")
   if settings.trainer_backend == "automodel" and fine_tuning_type != "lora":
     raise ValueError("The automodel trainer supports LoRA only")
-  if settings.trainer_devices > 1 and settings.trainer_backend != "automodel":
-    raise ValueError("openrl.trainer_devices above 1 needs openrl.trainer_backend=automodel")
-  if settings.trainer_devices > 1 and isinstance(worker_manager, LocalWorkerManager):
-    raise ValueError("openrl.trainer_devices above 1 needs a server that launches workers as pods")
-  if settings.trainer_devices % settings.trainer_cp:
-    raise ValueError(f"openrl.trainer_cp={settings.trainer_cp} must divide openrl.trainer_devices={settings.trainer_devices}")
+  if settings.trainer_device_count > 1 and settings.trainer_backend != "automodel":
+    raise ValueError("openrl.trainer_device_count above 1 needs openrl.trainer_backend=automodel")
+  if settings.trainer_device_count > 1 and isinstance(worker_manager, LocalWorkerManager):
+    raise ValueError("openrl.trainer_device_count above 1 needs a server that launches workers as pods")
+  if settings.trainer_device_count % settings.trainer_cp:
+    raise ValueError(f"openrl.trainer_cp={settings.trainer_cp} must divide openrl.trainer_device_count={settings.trainer_device_count}")
   model_id = str(uuid.uuid4())
   meta_obj = TrainingModelMetadata(
     base_model=base_model,
@@ -604,7 +604,7 @@ async def _extract_and_persist_model_metadata(
     sampler_replicas=settings.sampler_replicas,
     exclusive=settings.exclusive,
     trainer_backend=settings.trainer_backend,
-    trainer_devices=settings.trainer_devices,
+    trainer_device_count=settings.trainer_device_count,
     trainer_cp=settings.trainer_cp,
     recipe=settings.recipe,
     client_log_id=settings.client_log_id,

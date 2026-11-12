@@ -47,7 +47,7 @@ class TrainingModelMetadata(BaseModel):
   exclusive: bool = False
   trainer_backend: str = "pytorch"
   # Records from before the rename hold it as trainer_gpus.
-  trainer_devices: int = Field(default=1, validation_alias=AliasChoices("trainer_devices", "trainer_gpus"))
+  trainer_device_count: int = Field(default=1, validation_alias=AliasChoices("trainer_device_count", "trainer_gpus"))
   trainer_cp: int = 1
   recipe: Literal["rl", "sft"] | None = None
   client_log_id: str | None = None
@@ -66,13 +66,13 @@ class TrainingModelMetadata(BaseModel):
     """Whether other workers may time-slice this job's GPUs. An FFT worker
     suspends between turns. A LoRA worker cannot, so its GPUs are never shared.
     A multi-GPU trainer is a torchrun group, which cannot park either."""
-    return self.fine_tuning_type != "lora" and not self.exclusive and self.trainer_devices == 1
+    return self.fine_tuning_type != "lora" and not self.exclusive and self.trainer_device_count == 1
 
   def shares_runtime(self) -> bool:
     """Whether this job's workers may serve other jobs too. A LoRA worker serves
     many jobs, one adapter each. An FFT worker serves one job. A multi-GPU
     trainer is sized for its job, so it serves only that job."""
-    return self.fine_tuning_type == "lora" and not self.exclusive and self.trainer_devices == 1
+    return self.fine_tuning_type == "lora" and not self.exclusive and self.trainer_device_count == 1
 
   def trainer_image(self) -> str | None:
     """The image trainer_backend names, when it is an image and not a trainer."""

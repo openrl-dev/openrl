@@ -97,7 +97,7 @@ def worker_env(meta: TrainingModelMetadata, base_model: str, runtime: str, is_lo
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     if meta.trainer_backend == "automodel":
       env["OPEN_RL_TRAINER_BACKEND"] = "automodel"
-    if meta.trainer_devices > 1:
+    if meta.trainer_device_count > 1:
       # FSDP2 needs NCCL; the batch broadcast between ranks goes over gloo.
       env["OPEN_RL_CONTROL_BACKEND"] = "cpu:gloo,cuda:nccl"
     if meta.trainer_cp > 1:

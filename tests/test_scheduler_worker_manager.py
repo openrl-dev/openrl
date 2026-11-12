@@ -342,7 +342,7 @@ class SchedulerWorkerManagerTest(unittest.TestCase):
     self.assertEqual(self.api.deleted, ["lora-job-am-0-trainer"])
 
   def test_a_multi_gpu_automodel_trainer_is_one_torchrun_group(self) -> None:
-    meta = {"base_model": "Qwen/Qwen3-0.6B", "fine_tuning_type": "lora", "trainer_backend": "automodel", "trainer_devices": 4}
+    meta = {"base_model": "Qwen/Qwen3-0.6B", "fine_tuning_type": "lora", "trainer_backend": "automodel", "trainer_device_count": 4}
     s = self.store_with("job-dp", meta)
     with patch("server.worker_manager.get_state_store", return_value=s), patch.dict(os.environ, {"OPEN_RL_AUTOMODEL_IMAGE": "am:1"}):
       self.manager.ensure("job-dp", "trainer")
@@ -368,7 +368,7 @@ class SchedulerWorkerManagerTest(unittest.TestCase):
     self.assertTrue(sampler["spec"]["exclusive"])
 
   def test_a_context_parallel_trainer_gets_its_cp_size(self) -> None:
-    meta = {"base_model": "Qwen/Qwen3-0.6B", "fine_tuning_type": "lora", "trainer_backend": "automodel", "trainer_devices": 4, "trainer_cp": 4}
+    meta = {"base_model": "Qwen/Qwen3-0.6B", "fine_tuning_type": "lora", "trainer_backend": "automodel", "trainer_device_count": 4, "trainer_cp": 4}
     s = self.store_with("job-cp", meta)
     with patch("server.worker_manager.get_state_store", return_value=s), patch.dict(os.environ, {"OPEN_RL_AUTOMODEL_IMAGE": "am:1"}):
       self.manager.ensure("job-cp", "trainer")
@@ -381,7 +381,7 @@ class SchedulerWorkerManagerTest(unittest.TestCase):
     # Records written before the rename name the trainer's device count trainer_gpus.
     meta = {"base_model": "Qwen/Qwen3-0.6B", "fine_tuning_type": "lora", "trainer_backend": "automodel", "trainer_gpus": 4}
     s = self.store_with("job-old", meta)
-    self.assertEqual(decode_model_metadata(s.kv_store["open_rl:model_meta:job-old"]).trainer_devices, 4)
+    self.assertEqual(decode_model_metadata(s.kv_store["open_rl:model_meta:job-old"]).trainer_device_count, 4)
     with patch("server.worker_manager.get_state_store", return_value=s), patch.dict(os.environ, {"OPEN_RL_AUTOMODEL_IMAGE": "am:1"}):
       self.manager.ensure("job-old", "trainer")
 
