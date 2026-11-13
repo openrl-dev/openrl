@@ -55,6 +55,23 @@ class GetInfoTest(ApiServerTest):
     self.assertEqual(via_sampler_ref["model_name"], "google/gemma-4-e2b")
     self.assertEqual(unknown["model_name"], "Qwen/Qwen2.5-0.5B")
 
+  def test_get_info_reports_the_lora_rank_the_job_was_created_with(self) -> None:
+    lora = json.dumps({"base_model": "google/gemma-4-e2b", "lora_config": {"rank": 32}})
+    full = json.dumps({"base_model": "google/gemma-4-e2b", "fine_tuning_type": "full", "lora_config": {"rank": 32}})
+    asyncio.run(api_server.state.set_value("open_rl:model_meta:model-r32", lora))
+    asyncio.run(api_server.state.set_value("open_rl:model_meta:model-full", full))
+    with patch.dict(os.environ, {"BASE_MODEL": "Qwen/Qwen2.5-0.5B"}, clear=True):
+      info = self.post("get_info", {"model_id": "model-r32"}).json()
+      via_sampler_ref = self.post("get_info", {"model_id": "tinker://model-r32/sampler_weights/sampler-1"}).json()
+      full_info = self.post("get_info", {"model_id": "model-full"}).json()
+      unknown = self.post("get_info", {"model_id": "model-unknown"}).json()
+
+    self.assertEqual(info["lora_rank"], 32)
+    self.assertEqual(via_sampler_ref["lora_rank"], 32)
+    # A full fine-tune has no adapter; the SDK still expects a rank, so it gets the default.
+    self.assertEqual(full_info["lora_rank"], 16)
+    self.assertEqual(unknown["lora_rank"], 16)
+
   def test_get_info_404s_without_base_model_env(self) -> None:
     with patch.dict(os.environ, {}, clear=True):
       response = self.post("get_info", {"model_id": "model-a"})
