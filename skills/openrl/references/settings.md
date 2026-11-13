@@ -34,5 +34,6 @@ client = tinker.ServiceClient(base_url=..., user_metadata={"openrl.fine_tuning_t
 Which settings a server accepts depends on how it runs workers: several are refused
 outside the Kubernetes deployment (`openrl.worker_launcher` in capabilities is not
 `scheduler`), and the 400 says so. The decision guide for bigger models, which turns
-on `openrl.exclusive`, `openrl.trainer_backend` and `openrl.trainer_gpus`, is in
-`lifecycle.md`.
+on `openrl.exclusive`, `openrl.trainer_backend` and `openrl.trainer_device_count`, is in
+`lifecycle.md`. `openrl.trainer_device_count` was named `openrl.trainer_gpus` before; servers still
+accept the old name as a deprecated alias.

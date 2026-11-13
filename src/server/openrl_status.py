@@ -87,7 +87,7 @@ def settings_of(meta: TrainingModelMetadata) -> dict[str, Any]:
     "openrl.exclusive": meta.exclusive,
     "openrl.sampler_replicas": meta.sampler_replicas,
     "openrl.trainer_backend": meta.trainer_backend,
-    "openrl.trainer_gpus": meta.trainer_gpus,
+    "openrl.trainer_device_count": meta.trainer_device_count,
     "openrl.trainer_cp": meta.trainer_cp,
     "openrl.recipe": meta.recipe,
   }

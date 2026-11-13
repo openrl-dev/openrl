@@ -131,7 +131,7 @@ def describe_worker(model_id: str, role: str) -> Worker:
   base_model = base_model_of(meta, runtime)
   pool = meta.pool(runtime) if role == "sampler" else None
   exclusive = not meta.shares_gpu()
-  devices = meta.trainer_gpus if role == "trainer" else 1
+  devices = meta.trainer_device_count if role == "trainer" else 1
   size = footprint(base_model, meta.fine_tuning_type, role)
   # Each torchrun rank is its own process with its own host memory.
   size = replace(size, host_request_bytes=size.host_request_bytes * devices, host_limit_bytes=size.host_limit_bytes * devices)

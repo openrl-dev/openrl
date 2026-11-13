@@ -103,7 +103,7 @@ then start training:
 
 ```bash
 export TINKER_API_KEY=tml-dummy-key   # OpenRL ignores it; the tinker client requires one
-export TINKER_TAGS=openrl.trainer_backend=automodel,openrl.trainer_gpus=4,openrl.trainer_cp=4,openrl.sampler_replicas=4
+export TINKER_TAGS=openrl.trainer_backend=automodel,openrl.trainer_device_count=4,openrl.trainer_cp=4,openrl.sampler_replicas=4
 uv run harvey-train base_url=http://127.0.0.1:9003 log_path=artifacts/harvey-labs/my-run
 ```
 

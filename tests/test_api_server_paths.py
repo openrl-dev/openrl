@@ -542,23 +542,65 @@ class TrainerBackendTest(ApiServerTest):
     self.assertIn("pods", response.json()["error"])
 
   def test_a_multi_gpu_trainer_is_automodel_only_and_never_shared(self) -> None:
-    session_id = self.post("create_session", {"tags": ["openrl.trainer_backend=automodel", "openrl.trainer_gpus=4"]}).json()["session_id"]
+    session_id = self.post("create_session", {"tags": ["openrl.trainer_backend=automodel", "openrl.trainer_device_count=4"]}).json()["session_id"]
     model_id = self.post("create_model", {"base_model": "m", "session_id": session_id}).json()["request_id"]
-    self.assertEqual(self.metadata(model_id)["trainer_gpus"], 4)
+    self.assertEqual(self.metadata(model_id)["trainer_device_count"], 4)
     self.assertNotEqual(self.active_set(model_id), "automodel-m-1")
 
+    response = self.post("create_model", {"base_model": "m", "user_metadata": {"openrl.trainer_device_count": "4"}})
+    self.assertEqual(response.status_code, 400)
+    self.assertIn("openrl.trainer_device_count above 1 needs openrl.trainer_backend=automodel", response.json()["error"])
+
+  def test_trainer_device_count_is_accepted(self) -> None:
+    tags = {"openrl.trainer_backend": "automodel", "openrl.trainer_device_count": "4"}
+    model_id = self.post("create_model", {"base_model": "m", "user_metadata": tags}).json()["request_id"]
+    meta = self.metadata(model_id)
+    self.assertEqual(meta["trainer_device_count"], 4)
+    self.assertNotIn("trainer_gpus", meta)
+    self.assertNotEqual(self.active_set(model_id), "automodel-m-1")
+
+  def test_trainer_gpus_alias_still_works(self) -> None:
+    session_id = self.post("create_session", {"tags": ["openrl.trainer_backend=automodel", "openrl.trainer_gpus=4"]}).json()["session_id"]
+    model_id = self.post("create_model", {"base_model": "m", "session_id": session_id}).json()["request_id"]
+    meta = self.metadata(model_id)
+    self.assertEqual(meta["trainer_device_count"], 4)
+    self.assertNotIn("trainer_gpus", meta)
+    self.assertNotEqual(self.active_set(model_id), "automodel-m-1")
+
+    # The old name is still checked the way it was, and errors name it as written.
     response = self.post("create_model", {"base_model": "m", "user_metadata": {"openrl.trainer_gpus": "4"}})
     self.assertEqual(response.status_code, 400)
     self.assertIn("openrl.trainer_backend=automodel", response.json()["error"])
+    response = self.post("create_model", {"base_model": "m", "user_metadata": {"openrl.trainer_backend": "automodel", "openrl.trainer_gpus": "9"}})
+    self.assertEqual(response.status_code, 400)
+    self.assertIn("openrl.trainer_gpus: Input should be less than or equal to 8", response.json()["error"])
 
-  def test_trainer_cp_must_divide_the_trainer_gpus(self) -> None:
-    tags = {"openrl.trainer_backend": "automodel", "openrl.trainer_gpus": "4"}
+  def test_conflicting_names_are_refused(self) -> None:
+    tags = {"openrl.trainer_backend": "automodel", "openrl.trainer_device_count": "2", "openrl.trainer_gpus": "4"}
+    response = self.post("create_model", {"base_model": "m", "user_metadata": tags})
+    self.assertEqual(response.status_code, 400)
+    self.assertIn("openrl.trainer_device_count=2", response.json()["error"])
+    self.assertIn("openrl.trainer_gpus=4", response.json()["error"])
+
+    # The two names are one setting, so a session and a model that disagree are refused too.
+    session_id = self.post("create_session", {"tags": ["openrl.trainer_backend=automodel", "openrl.trainer_gpus=4"]}).json()["session_id"]
+    response = self.post("create_model", {"base_model": "m", "session_id": session_id, "user_metadata": {"openrl.trainer_device_count": "2"}})
+    self.assertEqual(response.status_code, 400)
+    self.assertIn("openrl.trainer_gpus=4", response.json()["error"])
+
+  def test_same_value_under_both_names_is_accepted(self) -> None:
+    tags = {"openrl.trainer_backend": "automodel", "openrl.trainer_device_count": "4", "openrl.trainer_gpus": 4}
+    model_id = self.post("create_model", {"base_model": "m", "user_metadata": tags}).json()["request_id"]
+    self.assertEqual(self.metadata(model_id)["trainer_device_count"], 4)
+
+  def test_trainer_cp_must_divide_the_trainer_device_count(self) -> None:
+    tags = {"openrl.trainer_backend": "automodel", "openrl.trainer_device_count": "4"}
     model_id = self.post("create_model", {"base_model": "m", "user_metadata": {**tags, "openrl.trainer_cp": "4"}}).json()["request_id"]
     self.assertEqual(self.metadata(model_id)["trainer_cp"], 4)
 
     response = self.post("create_model", {"base_model": "m", "user_metadata": {**tags, "openrl.trainer_cp": "3"}})
     self.assertEqual(response.status_code, 400)
-    self.assertIn("openrl.trainer_cp=3 must divide", response.json()["error"])
+    self.assertIn("openrl.trainer_cp=3 must divide openrl.trainer_device_count=4", response.json()["error"])
 
   def test_a_server_without_a_worker_manager_refuses_automodel(self) -> None:
     with patch.object(api_server, "worker_manager", None):
