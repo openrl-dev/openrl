@@ -1155,12 +1155,14 @@ async def get_info(req: GetInfoRequest):
   if not model_name:
     raise HTTPException(status_code=404, detail="No base model is configured")
   # SDK compatibility: the public client currently expects LoRA-shaped training metadata,
-  # even when this process is running a full fine-tuning worker.
+  # even when this process is running a full fine-tuning worker. A LoRA job reports the
+  # rank it was created with; a full fine-tune has none, so it keeps the placeholder 16.
+  lora_rank = meta.lora_config.rank if meta is not None and meta.fine_tuning_type == "lora" else 16
   result = {
     "model_data": {"arch": "unknown", "model_name": model_name, "tokenizer_id": model_name},
     "model_id": model_id or "model-live-123",
     "is_lora": True,
-    "lora_rank": 16,
+    "lora_rank": lora_rank,
     "model_name": model_name,
     "type": "get_info",
   }
