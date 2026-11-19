@@ -186,6 +186,20 @@ class SchedulerWorkerManagerTest(unittest.TestCase):
       env = {e["name"]: e.get("value") for e in pod["spec"]["template"]["spec"]["containers"][0]["env"]}
       self.assertEqual({k: env.get(k) for k in settings}, settings)
 
+  def test_workers_read_the_hugging_face_token_from_its_secret(self) -> None:
+    s = self.store_with("job-lora-1", {"base_model": "google/gemma-3-1b-it", "fine_tuning_type": "lora"})
+    # A token the API server holds is not copied into the Workload, where anyone who can read Workloads would see it.
+    with patch.dict(os.environ, {"HF_TOKEN": "hf_server_token"}), patch("server.worker_manager.get_state_store", return_value=s):
+      self.manager.ensure("job-lora-1", "trainer")
+      self.manager.ensure("job-lora-1", "sampler")
+
+    self.assertEqual(len(self.api.created), 2)
+    for pod in self.api.created:
+      self.assertNotIn("hf_server_token", json.dumps(pod))
+      (token,) = [e for e in pod["spec"]["template"]["spec"]["containers"][0]["env"] if e["name"] == "HF_TOKEN"]
+      # Optional, so workers on a cluster without the Secret still start.
+      self.assertEqual(token, {"name": "HF_TOKEN", "valueFrom": {"secretKeyRef": {"name": "hf-token", "key": "token", "optional": True}}})
+
   def test_samplers_keep_the_vllm_compile_cache_on_the_shared_volume(self) -> None:
     s = self.store_with("job-lora-1", {"base_model": "Qwen/Qwen2.5-0.5B", "fine_tuning_type": "lora"})
     with patch("server.worker_manager.get_state_store", return_value=s):

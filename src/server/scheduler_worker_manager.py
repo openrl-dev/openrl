@@ -65,6 +65,8 @@ ROUTER_CONFIG = "/etc/sampler-router"
 # On a pool's Deployment and NetworkPolicy, so release_owner finds them after the pool's Workloads are gone.
 OWNER_LABEL = "openrl.io/owner"
 PLACEMENT_HISTORY, PLACEMENT_HISTORY_SECONDS = 200, 7 * 24 * 3600
+# The Secret in the workers' namespace whose `token` key workers read as HF_TOKEN.
+HF_TOKEN_SECRET = "hf-token"
 
 
 def workload_name(role: str, owner: str, is_lora: bool, index: int = 0) -> str:
@@ -175,6 +177,9 @@ def pod_env(worker: Worker) -> list[dict[str, Any]]:
     env.append(downward("POD_IP", "status.podIP"))
   # The pod a worker names on the records it keeps.
   env += [downward("POD_NAME", "metadata.name"), downward("POD_UID", "metadata.uid"), downward("NODE_NAME", "spec.nodeName")]
+  # Gated models need a Hugging Face token. It stays in its Secret rather than in the Workload, and a cluster
+  # without the Secret starts its workers without one.
+  env.append({"name": "HF_TOKEN", "valueFrom": {"secretKeyRef": {"name": HF_TOKEN_SECRET, "key": "token", "optional": True}}})
   return env
 
 

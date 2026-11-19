@@ -102,6 +102,11 @@ each trainer and sampler, and the OpenRL scheduler starts their pods. The API
 server writes each worker's environment into the `Workload`'s pod template, so
 there are no worker deployments to configure by hand.
 
+Workers read `HF_TOKEN` from the `token` key of the Secret `hf-token` in their
+namespace, if it exists. Gated Hugging Face models need it; see
+[Use gated models](setup/lora-dra.md#use-gated-models). The API server does not
+pass its own `HF_TOKEN` to the workers.
+
 ## Sampling pools
 
 Sampling goes through sampling pools. A pool serves one FFT job, one exclusive

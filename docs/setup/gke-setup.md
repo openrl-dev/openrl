@@ -127,7 +127,7 @@ Apply **only one** of the following release bundles. Both install the same API s
     ```
     The DaemonSets run privileged, with host PID and host network, and schedule onto nodes labeled `nvidia.com/gpu.present=true` (set on the pool above). The snapshot agent checkpoints CUDA processes and needs NVIDIA driver r570 or newer, which the `latest` driver installer above provides. FFT workers never share a GPU with a LoRA worker. See [GKE FFT Time-Slice Setup](gke-fft-timeslice.md) for how the sharing works.
 
-Replace `latest/download` with `download/<tag>` to pin a specific version. See [OpenRL on an existing DRA cluster](lora-dra.md) for what each bundle installs, and for using storage other than Filestore.
+Replace `latest/download` with `download/<tag>` to pin a specific version. See [OpenRL on an existing DRA cluster](lora-dra.md) for what each bundle installs, for using gated Hugging Face models, and for using storage other than Filestore.
 
 To track unreleased code on `main` instead, render the overlay from a checkout, `k8s/deploy/lora` or `k8s/deploy/fft`:
 

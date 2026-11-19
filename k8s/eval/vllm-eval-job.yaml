@@ -53,6 +53,13 @@ spec:
           value: "/mnt/shared/open-rl/evals/last-eval.json"
         - name: HF_HOME
           value: "/mnt/shared/open-rl/huggingface"
+        # Gated models' tokenizers and weights; the workers read the same Secret.
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
         resources:
           claims:
           - name: trainer-gpu

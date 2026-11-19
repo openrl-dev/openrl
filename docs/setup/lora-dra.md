@@ -96,6 +96,25 @@ Any Tinker SDK from 0.23 onward can talk to the API server. SDKs from 0.25 send
 training requests and read training and sampling results as protobuf; the
 API server serves both that and the older JSON encoding.
 
+## Use gated models
+
+Workers download weights from Hugging Face, and gated models such as Gemma 3 or
+Llama need a token from an account that has accepted the model's license. A
+token also gives public models the higher download rate limits of a signed-in
+account. Store it in a Secret named `hf-token`, under the key `token`, in the
+workers' namespace:
+
+```bash
+kubectl --context my-cluster -n openrl-system create secret generic hf-token \
+  --from-literal=token="$HF_TOKEN"
+```
+
+Every trainer and sampler pod sets `HF_TOKEN` from it. The reference is
+optional, so without the Secret workers start as before and load public models
+only. A worker reads the Secret when its pod starts, so after creating or
+changing it, workers that are already running keep the token they started with
+until they are replaced.
+
 ## Use different storage
 
 Both bundles create one PersistentVolumeClaim, `open-rl-shared-pvc`, on the GKE
