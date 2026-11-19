@@ -85,6 +85,31 @@ gcloud container node-pools create open-rl-l4 \
   --disk-size=200
 ```
 
+<details>
+<summary><b>Multi-GPU node pool (8 × H100 for Harvey LAB and large models)</b></summary>
+
+For multi-GPU training and sampling (for example, the 4-GPU Automodel CP4 trainer
+plus 4 vLLM samplers used by [Harvey LAB RL](harvey-lab-on-gke.md)), create an
+8-GPU node pool with the same DRA labels and `gpu-driver-version=disabled`:
+
+```bash
+gcloud container node-pools create open-rl-h100 \
+  --cluster="${CLUSTER}" \
+  --location="${REGION}" \
+  --node-locations="${ZONE}" \
+  --machine-type=a3-highgpu-8g \
+  --accelerator=type=nvidia-h100-80gb,count=8,gpu-driver-version=disabled \
+  --node-labels=openrl.io/enabled=true,gke-no-default-nvidia-gpu-device-plugin=true,nvidia.com/gpu.present=true \
+  --image-type=COS_CONTAINERD \
+  --num-nodes=1 \
+  --disk-size=200
+```
+
+See [Multi-GPU Training and Sampling](../multi-gpu.md) for the `TINKER_TAGS`
+settings, layouts, and exclusivity rules.
+
+</details>
+
 Connect `kubectl`:
 
 ```bash

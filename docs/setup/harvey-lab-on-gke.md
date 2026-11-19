@@ -43,10 +43,11 @@ If Workloads for the run already exist, delete them after updating the API
 server so OpenRL recreates the worker pods with the new limits.
 
 The Job requests its trainer and samplers through `TINKER_TAGS` with
-`openrl.trainer_backend=automodel,openrl.trainer_device_count=4,openrl.trainer_cp=4,openrl.sampler_replicas=4`.
-Without context parallelism, the trainer runs out of GPU memory. One 80 GB H100
-fits about 80k tokens of Qwen3.5-9B, and data parallelism does not help because
-each GPU still holds a full sequence.
+`openrl.trainer_backend=automodel,openrl.trainer_device_count=4,openrl.trainer_cp=4,openrl.sampler_replicas=4`
+(see [Multi-GPU Training and Sampling](../multi-gpu.md) for all multi-GPU
+options and exclusivity rules). Without context parallelism, the trainer runs
+out of GPU memory. One 80 GB H100 fits about 80k tokens of Qwen3.5-9B, and data
+parallelism does not help because each GPU still holds a full sequence.
 
 ## 2. Build the driver image
 

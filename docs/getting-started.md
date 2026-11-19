@@ -319,6 +319,10 @@ Any Tinker SDK client works against OpenRL, so the larger examples carry over:
 
 - [Text-to-SQL RL recipe](../examples/text-to-sql/README.md): SFT then RL with
   SQL execution rewards on Gemma 4.
+- [Harvey LAB RL recipe](../examples/harvey_labs/README.md): 8-GPU long-context
+  agentic RL with Automodel CP4 training and 4 vLLM sampler replicas.
+- [Multi-GPU training and sampling](multi-gpu.md): `TINKER_TAGS` settings,
+  layouts, and exclusivity rules for scaling past 2 GPUs.
 - [Pig Latin](../examples/sft/pig-latin/piglatin_sft_notebook.ipynb) and
   [Text-to-SQL](../examples/sft/text-to-sql/texttosql_sft_notebook.ipynb) SFT
   notebooks.

@@ -130,11 +130,15 @@ Detailed guides and runnable examples are structured under `docs/` and `examples
     - [Text-to-SQL SFT Notebook](examples/sft/text-to-sql/texttosql_sft_notebook.ipynb)
   - Reinforcement Learning:
     - [Text-to-SQL RL Recipe](examples/text-to-sql/README.md)
+    - [Harvey LAB RL Recipe](examples/harvey_labs/README.md) (8-GPU long-context agentic RL)
 - **Technical Documentation**:
   - [Architecture](docs/architecture.md)
+  - [Multi-GPU Training and Sampling](docs/multi-gpu.md)
+  - [Configuration](docs/configuration.md)
   - [Tinker Client Compatibility](docs/tinker-client-compatibility.md)
 - **Deployment**:
   - [Kubernetes Deployment Guide (GKE)](docs/setup/gke-setup.md)
+  - [Harvey LAB RL on GKE](docs/setup/harvey-lab-on-gke.md)
 
 ## Roadmap
 
