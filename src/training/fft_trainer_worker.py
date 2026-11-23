@@ -346,10 +346,17 @@ class FFTTrainingWorker(BaseTrainerWorker):
     return {"model_id": model_id, "base_model": base_model}
 
   def forward_backward(
-    self, data: list[Datum], loss_fn: str, loss_config: dict | None = None, model_id: str | None = None, forward_only: bool = False
+    self,
+    data: list[Datum] | list[Any],
+    loss_fn: str,
+    loss_config: dict | None = None,
+    model_id: str | None = None,
+    forward_only: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
     assert self.model is not None, "Model must be loaded first."
-    res = super().forward_backward(self.model, data, loss_fn, loss_config, forward_only=forward_only)
+    res = super().forward_backward(self.model, data, loss_fn, loss_config, forward_only=forward_only, return_proto=return_proto)
     if torch.cuda.is_available():
       torch.cuda.empty_cache()
     return res
@@ -477,8 +484,10 @@ class FFTTrainingWorker(BaseTrainerWorker):
     temperature: float = 0.0,
     model_id: str | None = None,
     include_prompt_logprobs: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
-    return super().generate(self.model, prompt_tokens, max_tokens, num_samples, temperature, include_prompt_logprobs)
+    return super().generate(self.model, prompt_tokens, max_tokens, num_samples, temperature, include_prompt_logprobs, return_proto=return_proto)
 
   def sleep(self) -> None:
     """Offload GPU tensors to pinned host CPU memory and empty CUDA allocator cache."""

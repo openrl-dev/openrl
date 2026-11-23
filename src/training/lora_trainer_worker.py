@@ -276,12 +276,19 @@ class LoraTrainingWorker(BaseTrainerWorker):
     return {"model_id": model_id, "is_lora": True, "base_model": base_model}
 
   def forward_backward(
-    self, data: list[Datum], loss_fn: str, loss_config: dict | None = None, model_id: str | None = None, forward_only: bool = False
+    self,
+    data: list[Datum] | list[Any],
+    loss_fn: str,
+    loss_config: dict | None = None,
+    model_id: str | None = None,
+    forward_only: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
     assert self.peft_model is not None, "Model must be loaded first."
     if model_id:
       self.peft_model.set_adapter(model_id)
-    return super().forward_backward(self.peft_model, data, loss_fn, loss_config, forward_only=forward_only)
+    return super().forward_backward(self.peft_model, data, loss_fn, loss_config, forward_only=forward_only, return_proto=return_proto)
 
   def optim_step(self, adam_params: dict[str, Any], model_id: str) -> dict[str, Any]:
     """Apply accumulated gradients and update model weights."""
@@ -342,7 +349,9 @@ class LoraTrainingWorker(BaseTrainerWorker):
     temperature: float = 0.0,
     model_id: str | None = None,
     include_prompt_logprobs: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
     if model_id:
       self.peft_model.set_adapter(model_id)
-    return super().generate(self.peft_model, prompt_tokens, max_tokens, num_samples, temperature, include_prompt_logprobs)
+    return super().generate(self.peft_model, prompt_tokens, max_tokens, num_samples, temperature, include_prompt_logprobs, return_proto=return_proto)

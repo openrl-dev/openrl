@@ -14,8 +14,10 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from server.api import wire
 from server.sampling_dispatcher import Dispatcher, HttpSampler, revision_file
 from server.sampling_store import SamplingStore, future_key
+from server.store import decode_wire_dict
 from tests.redis_server import RedisTestCase
 from tests.test_exclusive_trainer import tiny_worker
 from training.fft_trainer_worker import FFTTrainingWorker
@@ -201,7 +203,7 @@ class SamplingDispatcherTest(RedisTestCase):
   async def results(self, request_id: str) -> list[dict]:
     await until(lambda: self.redis.llen(future_key(request_id)))
     await asyncio.sleep(0.3)  # a second result would show by now
-    return [json.loads(raw) for raw in await self.redis.lrange(future_key(request_id), 0, -1)]
+    return [wire.decode_future_result_json(decode_wire_dict(raw)) for raw in await self.redis.lrange(future_key(request_id), 0, -1)]
 
   async def test_each_request_is_generated_once(self):
     replicas = await self.replicas("default", "default")

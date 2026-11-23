@@ -5,6 +5,7 @@ the worker loop parses it back and dispatches on its type. The wire form is
 the existing queue envelope, with `op` naming the type and `payload` holding its fields.
 """
 
+import base64
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -48,10 +49,11 @@ class CreateModelFromState(Command):
 
 class ForwardBackward(Command):
   op: Literal["forward_backward"] = "forward_backward"
-  data: list[Datum]
+  data: list[Datum] = []
   loss_fn: str = "cross_entropy"
   loss_config: dict[str, Any] = {}
   forward_only: bool = False
+  proto_bytes: bytes | None = None
 
 
 class OptimStep(Command):
@@ -127,11 +129,19 @@ def parse_command(raw: dict[str, Any]) -> TrainingCommand:
     if not isinstance(payload, dict) or payload.keys() & envelope.keys():
       raise ValueError("Invalid command payload")
     raw = {**payload, **envelope}
+  if "proto_b64" in raw and "proto_bytes" not in raw:
+    raw = dict(raw)
+    raw["proto_bytes"] = base64.b64decode(raw.pop("proto_b64"))
   return command_adapter.validate_python(raw)
 
 
 def wire(command: Command) -> dict[str, Any]:
-  raw = command.model_dump(mode="json")
+  if isinstance(command, ForwardBackward) and command.proto_bytes is not None:
+    raw = command.model_dump(mode="json", exclude={"proto_bytes", "data"})
+    envelope = {key: raw.pop(key) for key in ("op", "request_id", "model_id", "trace_context")}
+    raw["proto_bytes"] = command.proto_bytes
+    return {**envelope, "payload": raw}
+  raw = command.model_dump(mode="json", exclude={"proto_bytes"} if isinstance(command, ForwardBackward) else None)
   envelope = {key: raw.pop(key) for key in ("op", "request_id", "model_id", "trace_context")}
   if isinstance(command, ForwardBackward):
     # Older workers flatten Tinker chunks themselves.

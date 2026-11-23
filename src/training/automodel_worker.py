@@ -400,12 +400,19 @@ class AutomodelTrainingWorker(BaseTrainerWorker):
   # -- the step --------------------------------------------------------------------
 
   def forward_backward(
-    self, data: list[Datum], loss_fn: str, loss_config: dict | None = None, model_id: str | None = None, forward_only: bool = False
+    self,
+    data: list[Datum] | list[Any],
+    loss_fn: str,
+    loss_config: dict | None = None,
+    model_id: str | None = None,
+    forward_only: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
     assert self.model is not None, "Model must be loaded first."
     self.activate(model_id)
     try:
-      return super().forward_backward(self.model, data, loss_fn, loss_config, forward_only=forward_only)
+      return super().forward_backward(self.model, data, loss_fn, loss_config, forward_only=forward_only, return_proto=return_proto)
     finally:
       self.close_cp_context()
 

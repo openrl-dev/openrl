@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import inspect
 import os
 import shutil
 import threading
@@ -18,6 +19,7 @@ from opentelemetry import propagate, trace
 
 from accel_timeslicer.time_slicer import TimeSlicerClient, time_slicer_client_from_env, time_slicing_enabled, workload_from_env
 from accel_timeslicer.workload import TRAINER_CLAIM, local_workload_name
+from server.api import wire
 from server.lora_snapshots import freeze_adapter
 from server.model_metadata import get_model_metadata
 from server.sampling_store import SamplingStore
@@ -381,13 +383,17 @@ class TrainingRequestsProcessor:
           "type": "model_loaded_from_state",
         }
       case commands.ForwardBackward():
+        datums = wire.datums(command.proto_bytes) if command.proto_bytes is not None else command.data
+        fb_kwargs: dict[str, Any] = {"forward_only": command.forward_only}
+        if command.proto_bytes is not None and "return_proto" in inspect.signature(self.worker.forward_backward).parameters:
+          fb_kwargs["return_proto"] = True
         result = await asyncio.to_thread(
           self.worker.forward_backward,
-          command.data,
+          datums,
           command.loss_fn,
           command.loss_config,
           command.model_id,
-          forward_only=command.forward_only,
+          **fb_kwargs,
         )
         result["type"] = "forward_backward_completed"
         return result
@@ -396,6 +402,9 @@ class TrainingRequestsProcessor:
         result["type"] = "optim_step_completed"
         return result
       case commands.Sample():
+        sample_kwargs: dict[str, Any] = {}
+        if "return_proto" in inspect.signature(self.worker.generate).parameters:
+          sample_kwargs["return_proto"] = True
         result = await asyncio.to_thread(
           self.worker.generate,
           command.prompt_tokens,
@@ -404,8 +413,9 @@ class TrainingRequestsProcessor:
           command.temperature,
           command.model_id,
           command.prompt_logprobs,
+          **sample_kwargs,
         )
-        result["type"] = "sample_completed"
+        result.setdefault("type", "sample_completed")
         return result
       case commands.SaveState():
         result = await asyncio.to_thread(self.worker.save_state, command.model_id, command.state_path, command.include_optimizer, command.kind)

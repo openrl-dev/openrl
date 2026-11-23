@@ -229,9 +229,16 @@ class ProtobufWireTest(unittest.TestCase):
     self.assertEqual(as_json.status_code, 200, as_json.text)
     from_json = self._queued()[0]
 
+    from server.api import wire
+
     self.assertEqual(from_proto["op"], "forward_backward")
     self.assertEqual(from_proto["model_id"], "model-abc")
-    self.assertEqual(from_proto["payload"], from_json["payload"])
+    self.assertEqual(from_proto["payload"]["proto_bytes"], body)
+    self.assertNotIn("data", from_proto["payload"])
+    self.assertEqual(
+      wire.decode_forward_backward(from_proto["payload"]["proto_bytes"]),
+      wire.decode_forward_backward(from_json["payload"]["proto_bytes"]),
+    )
     self.assertEqual(from_proto["payload"]["loss_fn"], "importance_sampling")
     self.assertEqual(from_proto["payload"]["loss_config"], {"clip_range": 0.2, "kl_coeff": 0.01, "mode": "token"})
 

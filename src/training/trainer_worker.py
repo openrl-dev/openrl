@@ -4,14 +4,28 @@ import math
 import os
 from typing import Any
 
+import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
 from server import telemetry
+from server.api import wire
 from training import losses
 from training.distributed import local_rank
 from training.types import Datum
+
+
+def _datum_tokens(datum: Any) -> Any:
+  return datum.tokens if isinstance(datum, wire.Datum) else datum.model_input
+
+
+def _datum_input(datum: Any, name: str) -> Any | None:
+  if isinstance(datum, wire.Datum):
+    return datum.inputs.get(name)
+  tensor = datum.loss_fn_inputs.get(name)
+  return tensor.data if tensor is not None else None
+
 
 # Position marker for a filler pass, see _run_batches.
 FILLER_DATUM_INDEX = -1
@@ -66,10 +80,12 @@ class BaseTrainerWorker:
   def forward_backward(
     self,
     model: PreTrainedModel,
-    data: list[Datum],
+    data: list[Datum] | list[wire.Datum],
     loss_fn: str,
     loss_config: dict | None = None,
     forward_only: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
     """Run a forward/backward pass on model and return Tinker-shaped loss outputs.
 
@@ -77,8 +93,10 @@ class BaseTrainerWorker:
     autograd and in eval mode, and no gradient is accumulated: the cookbook's
     NLL evaluator calls it on held-out data right before a training step, so
     a backward here would fold the test set into the next optim_step.
+    When ``return_proto`` is True, logprobs are packed directly into a binary
+    ``ForwardBackwardOutput`` protobuf envelope without ``.tolist()`` overhead.
     """
-    loss_fn_outputs: list[dict[str, Any] | None] = [None] * len(data)
+    loss_fn_outputs: list[Any] = [None] * len(data)
 
     if forward_only:
       model.eval()
@@ -86,8 +104,8 @@ class BaseTrainerWorker:
       model.train()
 
     with torch.set_grad_enabled(not forward_only):
-      total_loss = self._run_batches(model, data, loss_fn, loss_config, forward_only, loss_fn_outputs)
-    return self._finish(data, loss_fn_outputs, total_loss)
+      total_loss = self._run_batches(model, data, loss_fn, loss_config, forward_only, loss_fn_outputs, return_proto=return_proto)
+    return self._finish(data, loss_fn_outputs, total_loss, return_proto=return_proto)
 
   # Data-parallel sharding hooks. By default every rank runs every datum; a
   # backend that reduces gradients across a DP group overrides these with it.
@@ -110,11 +128,13 @@ class BaseTrainerWorker:
   def _run_batches(
     self,
     model: PreTrainedModel,
-    data: list[Datum],
+    data: list[Datum] | list[wire.Datum],
     loss_fn: str,
     loss_config: dict | None,
     forward_only: bool,
-    loss_fn_outputs: list[dict[str, Any] | None],
+    loss_fn_outputs: list[Any],
+    *,
+    return_proto: bool = False,
   ) -> float:
     """Run every batch, fill ``loss_fn_outputs`` in place, and return the summed loss.
 
@@ -151,8 +171,8 @@ class BaseTrainerWorker:
         case "cross_entropy":
           elementwise_loss = losses.cross_entropy_loss(target_logprobs, weights)
         case "importance_sampling":
-          old_logprobs = self.pad_sequences([datum.loss_fn_inputs["logprobs"].data for datum in batch_data], lengths, torch.float32)
-          advantages = self.pad_sequences([datum.loss_fn_inputs["advantages"].data for datum in batch_data], lengths, torch.float32)
+          old_logprobs = self.pad_sequences([_datum_input(datum, "logprobs") for datum in batch_data], lengths, torch.float32)
+          advantages = self.pad_sequences([_datum_input(datum, "advantages") for datum in batch_data], lengths, torch.float32)
           elementwise_loss = losses.importance_sampling_loss(
             target_logprobs,
             weights,
@@ -160,8 +180,8 @@ class BaseTrainerWorker:
             advantages,
           )
         case "ppo":
-          old_logprobs = self.pad_sequences([datum.loss_fn_inputs["logprobs"].data for datum in batch_data], lengths, torch.float32)
-          advantages = self.pad_sequences([datum.loss_fn_inputs["advantages"].data for datum in batch_data], lengths, torch.float32)
+          old_logprobs = self.pad_sequences([_datum_input(datum, "logprobs") for datum in batch_data], lengths, torch.float32)
+          advantages = self.pad_sequences([_datum_input(datum, "advantages") for datum in batch_data], lengths, torch.float32)
           elementwise_loss = losses.ppo_loss(
             target_logprobs,
             weights,
@@ -179,12 +199,16 @@ class BaseTrainerWorker:
       if not is_filler:
         total_loss += loss.item()
 
-      detached_logprobs = target_logprobs.detach().cpu()
+      detached_logprobs = target_logprobs.detach().cpu().float()
       for row, original_idx in enumerate(batch_indices):
         row_len = lengths[row]
-        logprobs_list = detached_logprobs[row, :row_len].tolist()
-        logprobs_list = [max(l, -9999.0) if not math.isinf(l) else (-9999.0 if l < 0 else 9999.0) for l in logprobs_list]
-        loss_fn_outputs[original_idx] = {"logprobs": {"data": logprobs_list, "dtype": "float32", "shape": [len(logprobs_list)]}}
+        row_lp = detached_logprobs[row, :row_len]
+        row_lp = torch.where(torch.isposinf(row_lp), torch.full_like(row_lp, 9999.0), row_lp)
+        row_lp = torch.clamp(row_lp, min=-9999.0)
+        if return_proto:
+          loss_fn_outputs[original_idx] = row_lp.numpy()
+        else:
+          loss_fn_outputs[original_idx] = {"logprobs": {"data": row_lp.tolist(), "dtype": "float32", "shape": [row_len]}}
 
     if shard_count > 1:
       total_loss = self.shard_all_reduce_sum(total_loss)
@@ -193,7 +217,14 @@ class BaseTrainerWorker:
           loss_fn_outputs[idx] = output
     return total_loss
 
-  def _finish(self, data: list[Datum], loss_fn_outputs: list[dict[str, Any] | None], total_loss: float) -> dict[str, Any]:
+  def _finish(
+    self,
+    data: list[Datum] | list[wire.Datum],
+    loss_fn_outputs: list[Any],
+    total_loss: float,
+    *,
+    return_proto: bool = False,
+  ) -> dict[str, Any]:
     mean_loss = total_loss / max(1, len(data))
     completed_loss_fn_outputs = []
     for output in loss_fn_outputs:
@@ -201,8 +232,11 @@ class BaseTrainerWorker:
         raise RuntimeError("forward_backward did not produce one loss_fn_output per input datum")
       completed_loss_fn_outputs.append(output)
 
+    metrics = self.sanitize_metrics({"loss:mean": mean_loss, "loss:sum": total_loss})
+    if return_proto:
+      return wire.proto_result("forward_backward_completed", wire.output(completed_loss_fn_outputs, metrics), metrics=metrics)
     return {
-      "metrics": self.sanitize_metrics({"loss:mean": mean_loss, "loss:sum": total_loss}),
+      "metrics": metrics,
       "loss_fn_outputs": completed_loss_fn_outputs,
       "loss_fn_output_type": "ArrayRecord",
     }
@@ -250,14 +284,14 @@ class BaseTrainerWorker:
     if token_budget <= 0:
       return [[(idx, datum)] for idx, datum in enumerate(data)]
 
-    ordered_data = sorted(enumerate(data), key=lambda item: len(item[1].model_input))
-    batches: list[list[tuple[int, Datum]]] = []
-    batch: list[tuple[int, Datum]] = []
+    ordered_data = sorted(enumerate(data), key=lambda item: len(_datum_tokens(item[1])))
+    batches: list[list[tuple[int, Any]]] = []
+    batch: list[tuple[int, Any]] = []
     batch_max_len = 0
     batch_tokens = 0
 
     for item in ordered_data:
-      length = len(item[1].model_input)
+      length = len(_datum_tokens(item[1]))
       next_max_len = max(batch_max_len, length)
       next_size = len(batch) + 1
       next_padded_tokens = next_max_len * next_size
@@ -281,7 +315,7 @@ class BaseTrainerWorker:
 
   def pad_sequences(
     self,
-    sequences: list[list[int] | list[float]],
+    sequences: list[Any],
     lengths: list[int],
     dtype: torch.dtype,
     pad_value: int | float = 0,
@@ -290,20 +324,26 @@ class BaseTrainerWorker:
     padded = torch.full((len(sequences), max(lengths)), pad_value, dtype=dtype, device=self.device)
     for row, sequence in enumerate(sequences):
       length = lengths[row]
-      padded[row, :length] = padded.new_tensor(sequence[:length])
+      if isinstance(sequence, np.ndarray):
+        arr = sequence[:length]
+        tensor = torch.from_numpy(arr if arr.flags.writeable else arr.copy())
+        padded[row, :length] = tensor.to(device=self.device, dtype=dtype)
+      else:
+        padded[row, :length] = padded.new_tensor(sequence[:length])
     return padded
 
   def pad_model_inputs(
     self,
-    data: list[Datum],
+    data: list[Datum] | list[wire.Datum],
   ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
     """Return input_ids and attention_mask with shape [batch, max_input_len]."""
     pad_token_id = self.tokenizer.pad_token_id if self.tokenizer and self.tokenizer.pad_token_id is not None else 0
     batch_size = len(data)
-    input_lengths = [len(datum.model_input) for datum in data]
+    tokens_list = [_datum_tokens(datum) for datum in data]
+    input_lengths = [len(tokens) for tokens in tokens_list]
     max_input_len = max(input_lengths)
 
-    input_ids = self.pad_sequences([datum.model_input for datum in data], input_lengths, torch.long, pad_token_id)
+    input_ids = self.pad_sequences(tokens_list, input_lengths, torch.long, pad_token_id)
     attention_mask = input_ids.new_zeros((batch_size, max_input_len))
     for row, input_len in enumerate(input_lengths):
       attention_mask[row, :input_len] = 1
@@ -312,16 +352,17 @@ class BaseTrainerWorker:
 
   def pad_targets_and_weights(
     self,
-    data: list[Datum],
+    data: list[Datum] | list[wire.Datum],
     input_lengths: list[int],
   ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
     """Return target_token_ids and weights with shape [batch, max_target_len]."""
     batch_size = len(data)
-    target_lengths = [len(datum.loss_fn_inputs["target_tokens"].data) for datum in data]
+    targets_list = [_datum_input(datum, "target_tokens") for datum in data]
+    target_lengths = [len(targets) for targets in targets_list]
     lengths = [min(input_lengths[row], target_lengths[row]) for row in range(batch_size)]
-    target_token_ids = self.pad_sequences([datum.loss_fn_inputs["target_tokens"].data for datum in data], lengths, torch.long)
+    target_token_ids = self.pad_sequences(targets_list, lengths, torch.long)
     weight_sequences = [
-      datum.loss_fn_inputs["weights"].data if "weights" in datum.loss_fn_inputs else [1.0] * target_lengths[row] for row, datum in enumerate(data)
+      w if (w := _datum_input(datum, "weights")) is not None else np.ones(target_lengths[row], dtype=np.float32) for row, datum in enumerate(data)
     ]
     weights = self.pad_sequences(weight_sequences, lengths, torch.float32)
 
@@ -364,6 +405,8 @@ class BaseTrainerWorker:
     num_samples: int = 1,
     temperature: float = 0.0,
     include_prompt_logprobs: bool = False,
+    *,
+    return_proto: bool = False,
   ) -> dict[str, Any]:
     """Generate completions from model."""
     model.eval()
@@ -387,6 +430,19 @@ class BaseTrainerWorker:
         output_scores=True,
         return_dict_in_generate=True,
       )
+
+    if return_proto:
+      sample_outs: list[wire.SampleOut] = []
+      for seq_idx in range(num_samples):
+        gen_tokens = outputs.sequences[seq_idx][len(prompt_tokens) :].cpu().numpy().astype(np.int32, copy=False)
+        lps = np.empty(len(gen_tokens), dtype=np.float32)
+        for step_idx, token_id in enumerate(gen_tokens):
+          score_tensor = outputs.scores[step_idx]
+          logprob = torch.nn.functional.log_softmax(score_tensor[seq_idx], dim=-1)[int(token_id)].item()
+          lps[step_idx] = self.sanitize_float(logprob)
+        sample_outs.append(wire.SampleOut(stop=True, tokens=gen_tokens, logprobs=lps))
+      plps_arr = np.asarray([math.nan if v is None else v for v in prompt_logprobs], dtype=np.float32) if prompt_logprobs is not None else None
+      return wire.proto_result("sample_completed", wire.sample_output(sample_outs, plps_arr))
 
     sequences_out = []
     for seq_idx in range(num_samples):
